@@ -156,25 +156,20 @@ class AnimateFromCoeff():
 
     def generate(self, x, video_save_dir, pic_path, crop_info, enhancer=None, background_enhancer=None, preprocess='crop', img_size=256):
 
-        source_image=x['source_image'].type(torch.FloatTensor)
-        source_semantics=x['source_semantics'].type(torch.FloatTensor)
-        target_semantics=x['target_semantics_list'].type(torch.FloatTensor) 
-        source_image=source_image.to(self.device)
-        source_semantics=source_semantics.to(self.device)
-        target_semantics=target_semantics.to(self.device)
+        source_image=x['source_image'].to(device=self.device, dtype=torch.float32)
+        source_semantics=x['source_semantics'].to(device=self.device, dtype=torch.float32)
+        target_semantics=x['target_semantics_list'].to(device=self.device, dtype=torch.float32) 
+        
         if 'yaw_c_seq' in x:
-            yaw_c_seq = x['yaw_c_seq'].type(torch.FloatTensor)
-            yaw_c_seq = x['yaw_c_seq'].to(self.device)
+            yaw_c_seq = x['yaw_c_seq'].to(device=self.device, dtype=torch.float32)
         else:
             yaw_c_seq = None
         if 'pitch_c_seq' in x:
-            pitch_c_seq = x['pitch_c_seq'].type(torch.FloatTensor)
-            pitch_c_seq = x['pitch_c_seq'].to(self.device)
+            pitch_c_seq = x['pitch_c_seq'].to(device=self.device, dtype=torch.float32)
         else:
             pitch_c_seq = None
         if 'roll_c_seq' in x:
-            roll_c_seq = x['roll_c_seq'].type(torch.FloatTensor) 
-            roll_c_seq = x['roll_c_seq'].to(self.device)
+            roll_c_seq = x['roll_c_seq'].to(device=self.device, dtype=torch.float32) 
         else:
             roll_c_seq = None
 

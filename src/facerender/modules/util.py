@@ -37,8 +37,21 @@ def make_coordinate_grid_2d(spatial_size, type):
     Create a meshgrid [-1,1] x [-1,1] of given spatial_size.
     """
     h, w = spatial_size
-    x = torch.arange(w).type(type)
-    y = torch.arange(h).type(type)
+    
+    # Patch for MPS: .type() with 'torch.mps.FloatTensor' is invalid
+    if isinstance(type, str) and 'mps' in type:
+        device = 'mps'
+        dtype = torch.float32
+    else:
+        device = None
+        dtype = None
+
+    if device:
+        x = torch.arange(w).to(device=device, dtype=dtype)
+        y = torch.arange(h).to(device=device, dtype=dtype)
+    else:
+        x = torch.arange(w).type(type)
+        y = torch.arange(h).type(type)
 
     x = (2 * (x / (w - 1)) - 1)
     y = (2 * (y / (h - 1)) - 1)
@@ -53,9 +66,23 @@ def make_coordinate_grid_2d(spatial_size, type):
 
 def make_coordinate_grid(spatial_size, type):
     d, h, w = spatial_size
-    x = torch.arange(w).type(type)
-    y = torch.arange(h).type(type)
-    z = torch.arange(d).type(type)
+    
+    # Patch for MPS: .type() with 'torch.mps.FloatTensor' is invalid
+    if isinstance(type, str) and 'mps' in type:
+        device = 'mps'
+        dtype = torch.float32
+    else:
+        device = None
+        dtype = None
+
+    if device:
+        x = torch.arange(w).to(device=device, dtype=dtype)
+        y = torch.arange(h).to(device=device, dtype=dtype)
+        z = torch.arange(d).to(device=device, dtype=dtype)
+    else:
+        x = torch.arange(w).type(type)
+        y = torch.arange(h).type(type)
+        z = torch.arange(d).type(type)
 
     x = (2 * (x / (w - 1)) - 1)
     y = (2 * (y / (h - 1)) - 1)
@@ -144,10 +171,24 @@ class ResBlock3d(nn.Module):
     def forward(self, x):
         out = self.norm1(x)
         out = F.relu(out)
-        out = self.conv1(out)
+        
+        # Patch for MPS: Conv3D not supported
+        if out.device.type == 'mps':
+            self.conv1.to('cpu')
+            out = self.conv1(out.cpu()).to('mps')
+        else:
+            out = self.conv1(out)
+            
         out = self.norm2(out)
         out = F.relu(out)
-        out = self.conv2(out)
+        
+        # Patch for MPS: Conv3D not supported
+        if out.device.type == 'mps':
+            self.conv2.to('cpu')
+            out = self.conv2(out.cpu()).to('mps')
+        else:
+            out = self.conv2(out)
+            
         out += x
         return out
 
@@ -186,7 +227,14 @@ class UpBlock3d(nn.Module):
     def forward(self, x):
         # out = F.interpolate(x, scale_factor=(1, 2, 2), mode='trilinear')
         out = F.interpolate(x, scale_factor=(1, 2, 2))
-        out = self.conv(out)
+        
+        # Patch for MPS: Conv3D not supported
+        if out.device.type == 'mps':
+            self.conv.to('cpu')
+            out = self.conv(out.cpu()).to('mps')
+        else:
+            out = self.conv(out)
+            
         out = self.norm(out)
         out = F.relu(out)
         return out
@@ -229,7 +277,13 @@ class DownBlock3d(nn.Module):
         self.pool = nn.AvgPool3d(kernel_size=(1, 2, 2))
 
     def forward(self, x):
-        out = self.conv(x)
+        # Patch for MPS: Conv3D not supported
+        if x.device.type == 'mps':
+            self.conv.to('cpu')
+            out = self.conv(x.cpu()).to('mps')
+        else:
+            out = self.conv(x)
+            
         out = self.norm(out)
         out = F.relu(out)
         out = self.pool(out)
@@ -310,7 +364,14 @@ class Decoder(nn.Module):
             skip = x.pop()
             out = torch.cat([out, skip], dim=1)
         # out = self.up_blocks[-1](out)
-        out = self.conv(out)
+        
+        # Patch for MPS: Conv3D not supported
+        if out.device.type == 'mps':
+            self.conv.to('cpu')
+            out = self.conv(out.cpu()).to('mps')
+        else:
+            out = self.conv(out)
+            
         out = self.norm(out)
         out = F.relu(out)
         return out

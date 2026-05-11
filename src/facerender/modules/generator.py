@@ -65,6 +65,11 @@ class OcclusionAwareGenerator(nn.Module):
             deformation = deformation.permute(0, 4, 1, 2, 3)
             deformation = F.interpolate(deformation, size=(d, h, w), mode='trilinear')
             deformation = deformation.permute(0, 2, 3, 4, 1)
+            
+        # Patch for MPS: grid_sample is unstable or crashes on some dimensions
+        if inp.device.type == 'mps':
+            return F.grid_sample(inp.cpu(), deformation.cpu()).to('mps')
+            
         return F.grid_sample(inp, deformation)
 
     def forward(self, source_image, kp_driving, kp_source):

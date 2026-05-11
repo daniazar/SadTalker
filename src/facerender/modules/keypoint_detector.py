@@ -58,7 +58,13 @@ class KPDetector(nn.Module):
             x = self.down(x)
 
         feature_map = self.predictor(x)
-        prediction = self.kp(feature_map)
+        
+        # Patch for MPS: Conv3D not supported
+        if feature_map.device.type == 'mps':
+            self.kp.to('cpu')
+            prediction = self.kp(feature_map.cpu()).to('mps')
+        else:
+            prediction = self.kp(feature_map)
 
         final_shape = prediction.shape
         heatmap = prediction.view(final_shape[0], final_shape[1], -1)
@@ -68,7 +74,13 @@ class KPDetector(nn.Module):
         out = self.gaussian2kp(heatmap)
 
         if self.jacobian is not None:
-            jacobian_map = self.jacobian(feature_map)
+            # Patch for MPS: Conv3D not supported
+            if feature_map.device.type == 'mps':
+                self.jacobian.to('cpu')
+                jacobian_map = self.jacobian(feature_map.cpu()).to('mps')
+            else:
+                jacobian_map = self.jacobian(feature_map)
+                
             jacobian_map = jacobian_map.reshape(final_shape[0], self.num_jacobian_maps, 9, final_shape[2],
                                                 final_shape[3], final_shape[4])
             heatmap = heatmap.unsqueeze(2)

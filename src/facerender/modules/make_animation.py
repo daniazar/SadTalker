@@ -109,18 +109,25 @@ def make_animation(source_image, source_semantics, target_semantics,
         kp_canonical = kp_detector(source_image)
         he_source = mapping(source_semantics)
         kp_source = keypoint_transformation(kp_canonical, he_source)
+        
+        # Patch for MPS: slicing sequences of specific lengths (like 212) can cause hard crashes
+        device = source_image.device
+        target_semantics_cpu = target_semantics.cpu()
+        yaw_c_seq_cpu = yaw_c_seq.cpu() if yaw_c_seq is not None else None
+        pitch_c_seq_cpu = pitch_c_seq.cpu() if pitch_c_seq is not None else None
+        roll_c_seq_cpu = roll_c_seq.cpu() if roll_c_seq is not None else None
     
-        for frame_idx in tqdm(range(target_semantics.shape[1]), 'Face Renderer:'):
+        for frame_idx in tqdm(range(target_semantics_cpu.shape[1]), 'Face Renderer:'):
             # still check the dimension
             # print(target_semantics.shape, source_semantics.shape)
-            target_semantics_frame = target_semantics[:, frame_idx]
+            target_semantics_frame = target_semantics_cpu[:, frame_idx].to(device)
             he_driving = mapping(target_semantics_frame)
-            if yaw_c_seq is not None:
-                he_driving['yaw_in'] = yaw_c_seq[:, frame_idx]
-            if pitch_c_seq is not None:
-                he_driving['pitch_in'] = pitch_c_seq[:, frame_idx] 
-            if roll_c_seq is not None:
-                he_driving['roll_in'] = roll_c_seq[:, frame_idx] 
+            if yaw_c_seq_cpu is not None:
+                he_driving['yaw_in'] = yaw_c_seq_cpu[:, frame_idx].to(device)
+            if pitch_c_seq_cpu is not None:
+                he_driving['pitch_in'] = pitch_c_seq_cpu[:, frame_idx].to(device) 
+            if roll_c_seq_cpu is not None:
+                he_driving['roll_in'] = roll_c_seq_cpu[:, frame_idx].to(device) 
             
             kp_driving = keypoint_transformation(kp_canonical, he_driving)
                 

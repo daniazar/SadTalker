@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 import tempfile
 import json
 import re
+import time
 
 app = FastAPI(title="SadTalker API")
 
@@ -66,14 +67,33 @@ async def generate_video(
             "--source_image", image_path,
             "--result_dir", output_dir,
             "--still",
-            "--preprocess", "crop"
+            "--preprocess", "crop",
+            "--batch_size", "1"
         ]
         
         def progress_generator():
             try:
-                with generation_lock:
+                # 1. Send immediate 'received' event
+                yield json.dumps({"status": "generating", "progress": 0, "message": "Queued for generation..."}) + "\n"
+                
+                # 2. Try to acquire lock with heartbeat
+                acquired = False
+                while not acquired:
+                    acquired = generation_lock.acquire(blocking=False)
+                    if not acquired:
+                        yield json.dumps({"status": "generating", "progress": 0, "message": "Waiting for other generations to finish..."}) + "\n"
+                        time.sleep(5)
+                    else:
+                        break
+                
+                try:
                     print(f"[{job_id}] Acquired generation lock. Running SadTalker: {' '.join(cmd)}")
+                    yield json.dumps({"status": "generating", "progress": 1, "message": "Initializing SadTalker models..."}) + "\n"
                     
+                    # Set environment for Mac MPS
+                    sub_env = os.environ.copy()
+                    sub_env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
                     process = subprocess.Popen(
                         cmd,
                         cwd=SADTALKER_DIR,
@@ -81,7 +101,8 @@ async def generate_video(
                         stderr=subprocess.STDOUT,
                         text=True,
                         bufsize=1,
-                        universal_newlines=True
+                        universal_newlines=True,
+                        env=sub_env
                     )
                     
                     # Regex to find progress: e.g. landmark Det::  85%|████████▍ | 90/106
@@ -120,26 +141,37 @@ async def generate_video(
                             yield json.dumps({"status": "generating", "progress": 98, "message": "Finalizing video..."}) + "\n"
                             
                     process.wait()
-                
-                if process.returncode != 0:
-                    yield json.dumps({"status": "error", "message": "SadTalker inference failed."}) + "\n"
-                    return
-
-                # Find result
-                mp4_files = [f for f in os.listdir(output_dir) if f.endswith(".mp4")]
-                if not mp4_files:
-                    yield json.dumps({"status": "error", "message": "No MP4 generated."}) + "\n"
-                    return
                     
-                final_video_rel = os.path.join(job_id, "results", mp4_files[0])
-                video_url = f"/outputs/{final_video_rel}"
-                
-                yield json.dumps({
-                    "status": "done", 
-                    "progress": 100,
-                    "presenterVideoPath": video_url,
-                    "message": "Generation complete!"
-                }) + "\n"
+                    if process.returncode != 0:
+                        error_msg = f"SadTalker inference failed with code {process.returncode}."
+                        if process.returncode == -9:
+                            error_msg = "SadTalker was terminated (likely Out of Memory)."
+                        elif process.returncode == -15:
+                            error_msg = "SadTalker was terminated (External kill)."
+                        
+                        yield json.dumps({"status": "error", "message": error_msg}) + "\n"
+                        return
+
+                    # Find result
+                    mp4_files = [f for f in os.listdir(output_dir) if f.endswith(".mp4")]
+                    if not mp4_files:
+                        yield json.dumps({"status": "error", "message": "No MP4 generated."}) + "\n"
+                        return
+                        
+                    final_video_rel = os.path.join(job_id, "results", mp4_files[0])
+                    video_url = f"/outputs/{final_video_rel}"
+                    
+                    yield json.dumps({
+                        "status": "done", 
+                        "progress": 100,
+                        "presenterVideoPath": video_url,
+                        "message": "Generation complete!"
+                    }) + "\n"
+
+                finally:
+                    if acquired:
+                        generation_lock.release()
+                        print(f"[{job_id}] Released generation lock.")
                 
             except Exception as e:
                 print(f"[{job_id}] ERROR: {str(e)}")

@@ -61,7 +61,13 @@ class DenseMotionNetwork(nn.Module):
         feature_repeat = feature.unsqueeze(1).unsqueeze(1).repeat(1, self.num_kp+1, 1, 1, 1, 1, 1)      # (bs, num_kp+1, 1, c, d, h, w)
         feature_repeat = feature_repeat.view(bs * (self.num_kp+1), -1, d, h, w)                         # (bs*(num_kp+1), c, d, h, w)
         sparse_motions = sparse_motions.view((bs * (self.num_kp+1), d, h, w, -1))                       # (bs*(num_kp+1), d, h, w, 3) !!!!
-        sparse_deformed = F.grid_sample(feature_repeat, sparse_motions)
+        
+        # Patch for MPS: grid_sample is unstable or crashes on some dimensions
+        if feature_repeat.device.type == 'mps':
+            sparse_deformed = F.grid_sample(feature_repeat.cpu(), sparse_motions.cpu()).to('mps')
+        else:
+            sparse_deformed = F.grid_sample(feature_repeat, sparse_motions)
+            
         sparse_deformed = sparse_deformed.view((bs, self.num_kp+1, -1, d, h, w))                        # (bs, num_kp+1, c, d, h, w)
         return sparse_deformed
 
@@ -71,8 +77,12 @@ class DenseMotionNetwork(nn.Module):
         gaussian_source = kp2gaussian(kp_source, spatial_size=spatial_size, kp_variance=0.01)
         heatmap = gaussian_driving - gaussian_source
 
-        # adding background feature
-        zeros = torch.zeros(heatmap.shape[0], 1, spatial_size[0], spatial_size[1], spatial_size[2]).type(heatmap.type())
+        # Patch for MPS: .type() with 'torch.mps.FloatTensor' is invalid
+        if 'mps' in heatmap.type():
+            zeros = torch.zeros(heatmap.shape[0], 1, spatial_size[0], spatial_size[1], spatial_size[2]).to(device=heatmap.device, dtype=heatmap.dtype)
+        else:
+            zeros = torch.zeros(heatmap.shape[0], 1, spatial_size[0], spatial_size[1], spatial_size[2]).type(heatmap.type())
+            
         heatmap = torch.cat([zeros, heatmap], dim=1)
         heatmap = heatmap.unsqueeze(2)         # (bs, num_kp+1, 1, d, h, w)
         return heatmap
@@ -80,7 +90,13 @@ class DenseMotionNetwork(nn.Module):
     def forward(self, feature, kp_driving, kp_source):
         bs, _, d, h, w = feature.shape
 
-        feature = self.compress(feature)
+        # Patch for MPS: Conv3D not supported
+        if feature.device.type == 'mps':
+            self.compress.to('cpu')
+            feature = self.compress(feature.cpu()).to('mps')
+        else:
+            feature = self.compress(feature)
+            
         feature = self.norm(feature)
         feature = F.relu(feature)
 
@@ -97,8 +113,12 @@ class DenseMotionNetwork(nn.Module):
 
         prediction = self.hourglass(input_)
 
-
-        mask = self.mask(prediction)
+        # Patch for MPS: Conv3D not supported
+        if prediction.device.type == 'mps':
+            self.mask.to('cpu')
+            mask = self.mask(prediction.cpu()).to('mps')
+        else:
+            mask = self.mask(prediction)
         mask = F.softmax(mask, dim=1)
         out_dict['mask'] = mask
         mask = mask.unsqueeze(2)                                   # (bs, num_kp+1, 1, d, h, w)
