@@ -1,0 +1,5 @@
+venv/
+checkpoints/
+tmp_uploads/
+.git
+__pycache__/
